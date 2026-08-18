@@ -1,0 +1,50 @@
+ANDROID MALWARE DETECTION USING STATIC AND DYNAMIC FEATURES
+======================================================================
+
+PROJECT PIPELINE
+Static Dataset + Dynamic Dataset
+        ↓
+Feature Fusion
+        ↓
+Data Preprocessing
+        ↓
+DNN / CNN / TabNet
+        ↓
+Model Comparison
+        ↓
+DNN Prediction
+        ↓
+Feature Importance + Explanation
+        ↓
+AI Agent
+
+DATASET DETAILS
+----------------------------------------------------------------------
+Samples: 3542
+Static features: 179
+Dynamic features: 161
+Final features: 340
+
+MODEL PERFORMANCE
+----------------------------------------------------------------------
+ Model  Accuracy  Precision  Recall  F1-Score  ROC-AUC
+   DNN    0.9817     0.9773  0.9857    0.9815   0.9970
+   CNN    0.9774     0.9717  0.9828    0.9772   0.9967
+TabNet    0.9182     0.8965  0.9427    0.9190   0.9690
+
+BEST MODEL
+----------------------------------------------------------------------
+DNN
+Accuracy : 98.17%
+Precision: 97.73%
+Recall   : 98.57%
+F1-score : 98.15%
+ROC-AUC  : 99.70%
+
+EXPLAINABILITY
+----------------------------------------------------------------------
+The DNN prediction is supported by feature importance analysis and an explanation engine.
+
+AI AGENT
+----------------------------------------------------------------------
+The AI agent converts model predictions and confidence values into a risk level, assessment, and security recommendation.
