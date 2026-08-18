@@ -872,8 +872,8 @@ def dashboard():
             ai_inner = f"""
             <div class="ai-grid">
               <div class="ai-verdict {malware_class}">
-                <div class="ai-muted">DNN MODEL DECISION</div>
-                <div class="verdict">{"🔴" if ai_verdict=="MALWARE" else "🟢"} {esc(ai_verdict)}</div>
+                <div class="ai-muted">ML MALWARE VERDICT</div>
+                <div class="verdict">{"🔴 MALWARE" if ai_verdict=="MALWARE" else "🟢 BENIGN"}</div>
                 <div class="ai-number">{prob:.2f}%</div>
                 <div class="ai-muted">Malware probability &nbsp; • &nbsp; Confidence {conf:.2f}%</div>
                 <div class="ai-chips">
@@ -940,21 +940,6 @@ def dashboard():
                 st.session_state.ai_chat.append(("user", user_q.strip()))
                 st.session_state.ai_chat.append(("agent", answer_ai_question(user_q, result, ai)))
                 st.rerun()
-
-    # Pipeline exactly in the visual position requested.
-    steps = ["Upload APK", "SHA-256", "Manifest", "Permissions", "Components", "Indicators", "Risk Analysis", "Report"]
-    html_steps = []
-    for i, s in enumerate(steps):
-        active = " active" if s == "Risk Analysis" else ""
-        html_steps.append(f'<div class="step{active}"><div class="step-circle">{"✓" if i<6 else "◈" if i==6 else "▣"}</div><div class="step-label">{s}</div></div>')
-        if i < len(steps)-1:
-            html_steps.append('<div class="arrow">›</div>')
-    st.markdown(f"""
-    <div class="pipeline">
-      <div class="pipeline-title">Analysis Pipeline</div>
-      <div class="steps">{''.join(html_steps)}</div>
-    </div>
-    """, unsafe_allow_html=True)
 
 
 def analyzer_page():
