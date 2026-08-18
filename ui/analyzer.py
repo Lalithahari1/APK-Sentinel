@@ -5,6 +5,10 @@ import json
 import math
 import zipfile
 from collections import Counter
+import logging
+
+logging.disable(logging.CRITICAL)
+from androguard.core.apk import APK
 
 # ============================================================
 # APK SENTINEL - ROBUST STATIC ANALYZER
@@ -218,7 +222,12 @@ def run_aapt(*args):
 # ============================================================
 
 def parse_aapt_badging(apk_path):
-    output = run_aapt("dump", "badging", apk_path)
+    """
+    Extract APK metadata using Androguard.
+    This avoids depending on Windows-only AAPT tools
+    when the application runs on Streamlit Cloud.
+    """
+
     meta = {
         "package": "Unknown",
         "version_name": "Unknown",
@@ -227,25 +236,53 @@ def parse_aapt_badging(apk_path):
         "target_sdk": "Unknown",
     }
 
-    match = re.search(
-        r"package:\s+name='([^']+)'\s+versionCode='([^']+)'\s+versionName='([^']*)'",
-        output,
-        re.I,
-    )
-    if match:
-        meta["package"] = match.group(1)
-        meta["version_code"] = match.group(2)
-        meta["version_name"] = match.group(3) or "Unknown"
+    try:
+        a = APK(str(apk_path))
 
-    min_match = re.search(r"sdkVersion:'([^']+)'", output)
-    target_match = re.search(r"targetSdkVersion:'([^']+)'", output)
-    if min_match:
-        meta["min_sdk"] = min_match.group(1)
-    if target_match:
-        meta["target_sdk"] = target_match.group(1)
+        # Package name
+        try:
+            package = a.get_package()
+            if package:
+                meta["package"] = package
+        except Exception:
+            pass
+
+        # Version name
+        try:
+            version_name = a.get_androidversion_name()
+            if version_name:
+                meta["version_name"] = str(version_name)
+        except Exception:
+            pass
+
+        # Version code
+        try:
+            version_code = a.get_androidversion_code()
+            if version_code:
+                meta["version_code"] = str(version_code)
+        except Exception:
+            pass
+
+        # Minimum SDK
+        try:
+            min_sdk = a.get_min_sdk_version()
+            if min_sdk:
+                meta["min_sdk"] = str(min_sdk)
+        except Exception:
+            pass
+
+        # Target SDK
+        try:
+            target_sdk = a.get_target_sdk_version()
+            if target_sdk:
+                meta["target_sdk"] = str(target_sdk)
+        except Exception:
+            pass
+
+    except Exception as exc:
+        print(f"Androguard metadata extraction failed: {exc}")
 
     return meta
-
 
 # ============================================================
 # PERMISSIONS
@@ -257,55 +294,49 @@ def clean_permissions(text):
 
 
 def get_permissions(apk_path):
-    output = run_apkanalyzer("manifest", "permissions", apk_path)
-    permissions = clean_permissions(output)
-    if permissions:
-        return permissions
+    """
+    Extract Android permissions using Androguard.
+    """
 
-    output = run_aapt("dump", "permissions", apk_path)
-    permissions = clean_permissions(output)
-    if permissions:
-        return permissions
+    try:
+        a = APK(str(apk_path))
 
-    # Last fallback: inspect manifest text.
-    output = run_apkanalyzer("manifest", "print", apk_path)
-    return clean_permissions(output)
+        permissions = a.get_permissions()
 
+        if permissions:
+            return list(dict.fromkeys(permissions))
 
+    except Exception as exc:
+        print(f"Androguard permission extraction failed: {exc}")
+
+    return []
 # ============================================================
 # MANIFEST / COMPONENTS
 # ============================================================
 
 def get_manifest(apk_path):
-    """Return as much decoded manifest information as possible.
-
-    apkanalyzer and aapt expose slightly different representations.  The
-    previous implementation stopped after the first non-empty output, which
-    could leave the component parser with a representation it did not match.
-    We now combine both outputs and let extract_components parse them.
     """
-    outputs = []
-
-    output = run_apkanalyzer("manifest", "print", apk_path)
-    if output:
-        outputs.append(output)
-
-    output = run_aapt(
-        "dump", "xmltree", apk_path,
-        "--file", "AndroidManifest.xml"
-    )
-    if output and output not in outputs:
-        outputs.append(output)
-
-    return "\n\n".join(outputs)
-
-
-def extract_components(manifest_text):
-    """Extract Android components from apkanalyzer/aapt manifest output.
-
-    Supports: activity, activity-alias, service, receiver and provider.
-    Handles both apkanalyzer ``E:/A:`` output and XML-like output.
+    Extract the Android manifest using Androguard.
     """
+
+    try:
+        a = APK(str(apk_path))
+        manifest = a.get_android_manifest_xml()
+
+        if manifest is not None:
+            return str(manifest)
+
+    except Exception as exc:
+        print(f"Androguard manifest extraction failed: {exc}")
+
+    return ""
+
+def extract_components(apk_path):
+    """
+    Extract Android activities, services, receivers and providers
+    directly from the Androguard APK object.
+    """
+
     components = {
         "activities": [],
         "services": [],
@@ -313,91 +344,71 @@ def extract_components(manifest_text):
         "providers": [],
     }
 
-    if not manifest_text:
+    if not apk_path or not os.path.isfile(apk_path):
         return components
 
-    def add(kind, name):
-        name = str(name or "").strip().strip("'\"")
-        if not name:
-            return
-        # aapt can print a resource/reference wrapper around values.
-        name = re.sub(r"^.*?\b(?:string|raw):", "", name, flags=re.I)
-        if name and name not in components[kind]:
-            components[kind].append(name)
+    try:
+        apk = APK(apk_path)
+    except Exception as exc:
+        print(f"APK component analysis failed: {exc}")
+        return components
 
-    lines = manifest_text.splitlines()
-    current_type = None
+    try:
+        components["activities"] = list(apk.get_activities() or [])
+    except Exception as exc:
+        print(f"Activity extraction failed: {exc}")
 
-    for line in lines:
-        stripped = line.strip()
+    try:
+        components["services"] = list(apk.get_services() or [])
+    except Exception as exc:
+        print(f"Service extraction failed: {exc}")
 
-        # apkanalyzer / aapt xmltree element marker.
-        m_type = re.match(
-            r"E:\s*(activity-alias|activity|service|receiver|provider)\b",
-            stripped,
-            re.I,
-        )
-        if m_type:
-            raw_type = m_type.group(1).lower()
-            current_type = "activities" if raw_type in {"activity", "activity-alias"} else raw_type + "s"
-            continue
+    try:
+        components["receivers"] = list(apk.get_receivers() or [])
+    except Exception as exc:
+        print(f"Receiver extraction failed: {exc}")
 
-        if current_type:
-            # Quoted value: android:name(...)="com.example.Main"
-            m_name = re.search(
-                r"android:name(?:\([^)]*\))?\s*=\s*\"([^\"]+)\"",
-                stripped,
-                re.I,
-            )
-            if not m_name:
-                # Single quotes are used by some XML renderers.
-                m_name = re.search(
-                    r"android:name(?:\([^)]*\))?\s*=\s*'([^']+)'",
-                    stripped,
-                    re.I,
-                )
-            if not m_name:
-                # aapt can emit: A: android:name(...)=(type 0x10)0x...
-                # In that case there may still be a quoted resolved value
-                # later in the line.
-                m_name = re.search(
-                    r"android:name[^=]*=.*?\"([^\"]+)\"",
-                    stripped,
-                    re.I,
-                )
-
-            if m_name:
-                add(current_type, m_name.group(1))
-                current_type = None
-
-    # XML-like fallback, including attributes that span additional spaces.
-    xml_patterns = {
-        "activities": r"<(?:activity|activity-alias)\b[^>]*?android:name\s*=\s*['\"]([^'\"]+)['\"]",
-        "services": r"<service\b[^>]*?android:name\s*=\s*['\"]([^'\"]+)['\"]",
-        "receivers": r"<receiver\b[^>]*?android:name\s*=\s*['\"]([^'\"]+)['\"]",
-        "providers": r"<provider\b[^>]*?android:name\s*=\s*['\"]([^'\"]+)['\"]",
-    }
-
-    for kind, pattern in xml_patterns.items():
-        for name in re.findall(pattern, manifest_text, re.I | re.S):
-            add(kind, name)
+    try:
+        components["providers"] = list(apk.get_providers() or [])
+    except Exception as exc:
+        print(f"Provider extraction failed: {exc}")
 
     return components
+def detect_boot_receiver(apk_path, receivers):
+    """
+    Detect whether the APK registers a receiver for
+    Android BOOT_COMPLETED events.
+    """
 
-
-def detect_boot_receiver(manifest_text, receivers):
-    if not manifest_text:
+    if not receivers:
         return False
 
-    boot_action = re.search(
-        r"android\.intent\.action\.BOOT_COMPLETED",
-        manifest_text,
-        re.I,
-    )
-    return bool(boot_action and receivers)
+    try:
+        apk = APK(apk_path)
 
+        manifest_xml = apk.get_android_manifest_xml()
 
-# ============================================================
+        # Convert the XML tree into actual XML text.
+        try:
+            from lxml import etree
+            text = etree.tostring(
+                manifest_xml,
+                encoding="unicode"
+            )
+        except Exception:
+            text = str(manifest_xml)
+
+        return bool(
+            re.search(
+                r"BOOT_COMPLETED",
+                text,
+                re.IGNORECASE
+            )
+        )
+
+    except Exception as exc:
+        print(f"Boot receiver detection failed: {exc}")
+        return False
 # APK CONTENT / STATIC METRICS
 # ============================================================
 
@@ -647,7 +658,7 @@ def analyze_apk(apk_path):
 
     # Manifest/components
     manifest = get_manifest(apk_path)
-    components = extract_components(manifest)
+    components = extract_components(apk_path)
 
     result["activities"] = components["activities"]
     result["services"] = components["services"]
@@ -656,7 +667,7 @@ def analyze_apk(apk_path):
 
     result["background_service"] = bool(result["services"])
     result["boot_receiver"] = detect_boot_receiver(
-        manifest,
+        apk_path,
         result["receivers"],
     )
 
